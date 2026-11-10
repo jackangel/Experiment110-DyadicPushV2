@@ -36,7 +36,7 @@ import torch.nn.functional as F
 
 @dataclass
 class DyadicShelfConfig:
-    vocab_size: int = 8192
+    vocab_size: int = 32000
     dim: int = 384
     hidden_dim: int = 1024
     num_layers: int = 8

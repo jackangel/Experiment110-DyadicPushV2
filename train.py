@@ -145,13 +145,14 @@ def train_tokenizer_from_parquet(
     col_map: dict,
     vocab_size: int,
     save_path: str,
-    max_samples: int = 10000,
+    samples_per_dataset: int = 10000,
 ) -> BPETokenizerWrapper:
     import pyarrow.parquet as pq
     from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 
     samples = []
     for name, path, _ in specs:
+        ds_samples = 0
         col = col_map.get(name, default_col)
         found = sorted(glob.glob(os.path.join(glob.escape(path), "**", "*.parquet"), recursive=True))
         for fp in found:
@@ -161,23 +162,23 @@ def train_tokenizer_from_parquet(
                     for text in batch.column(0).to_pylist():
                         if text:
                             samples.append(str(text))
-                            if len(samples) >= max_samples:
+                            ds_samples += 1
+                            if ds_samples >= samples_per_dataset:
                                 break
-                    if len(samples) >= max_samples:
+                    if ds_samples >= samples_per_dataset:
                         break
                 if hasattr(pf, "close"):
                     pf.close()
             except Exception:
                 pass
-            if len(samples) >= max_samples:
+            if ds_samples >= samples_per_dataset:
                 break
-        if len(samples) >= max_samples:
-            break
+        print(f"[*] Collected {ds_samples:,} samples from '{name}' for tokenizer training.")
 
     if not samples:
         raise RuntimeError("No text could be extracted from parquet files to train a tokenizer.")
 
-    print(f"[*] Training BPE tokenizer on {len(samples)} text samples from Parquet files...")
+    print(f"[*] Training BPE tokenizer on {len(samples):,} total text samples from {len(specs)} dataset(s)...")
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))
     tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
     tokenizer.decoder = decoders.ByteLevel()
@@ -187,6 +188,8 @@ def train_tokenizer_from_parquet(
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
     )
     tokenizer.train_from_iterator(samples, trainer)
+    actual_vocab = tokenizer.get_vocab_size()
+    print(f"[*] Tokenizer training complete. Vocab size: {actual_vocab:,} (target: {vocab_size:,})")
     if save_path:
         tokenizer.save(save_path)
     return BPETokenizerWrapper(tokenizer)
@@ -527,6 +530,7 @@ def main():
     parser.add_argument("--text_column", type=str, default="text", help="Parquet text column: 'col' or 'name=col,name2=col2'")
     parser.add_argument("--completed_log", type=str, default=None, help="Path to completed-parquet-files log JSON")
     parser.add_argument("--reset_completed", action="store_true", help="Ignore completed-files log and retrain all files")
+    parser.add_argument("--retrain_tokenizer", action="store_true", help="Force retraining the tokenizer even if tokenizer.json exists")
     parser.add_argument("--stats_interval", type=int, default=500, help="Print mixer stats every N optimizer steps")
 
     args = parser.parse_args()
@@ -581,7 +585,7 @@ def main():
             tokenizer = BPETokenizerWrapper.from_json_str(tok_info["data"])
         elif tok_type == "char":
             tokenizer = CharTokenizer.from_dict(tok_info)
-    elif os.path.exists(tok_json_path):
+    elif os.path.exists(tok_json_path) and not args.retrain_tokenizer:
         tokenizer = load_or_create_tokenizer(
             data_path=None,
             tokenizer_type=args.tokenizer_type,
@@ -589,6 +593,14 @@ def main():
             save_dir=args.checkpoint_dir,
             tokenizer_path=tok_json_path,
         )
+        if tokenizer.vocab_size != args.vocab_size:
+            print(
+                f"[!] Notice: Loaded existing tokenizer '{tok_json_path}' with vocab_size={tokenizer.vocab_size:,}, "
+                f"which differs from requested --vocab_size={args.vocab_size:,}."
+            )
+            print(
+                f"    To retrain with vocab_size={args.vocab_size:,}, pass --retrain_tokenizer or specify a new --checkpoint_dir."
+            )
     elif not mixed and os.path.exists(args.data):
         tokenizer = load_or_create_tokenizer(
             data_path=args.data,

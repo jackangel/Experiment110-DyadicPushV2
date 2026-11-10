@@ -66,7 +66,7 @@ class BPETokenizerWrapper:
             pass
 
     @classmethod
-    def train_from_file(cls, file_path: str, vocab_size: int = 8192, save_path: Optional[str] = None) -> "BPETokenizerWrapper":
+    def train_from_file(cls, file_path: str, vocab_size: int = 32000, save_path: Optional[str] = None) -> "BPETokenizerWrapper":
         try:
             from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
         except ImportError:
@@ -165,7 +165,7 @@ class BPETokenizerWrapper:
 def load_or_create_tokenizer(
     data_path: Optional[str] = "input.txt",
     tokenizer_type: str = "auto",
-    vocab_size: int = 8192,
+    vocab_size: int = 32000,
     save_dir: str = "checkpoints",
     tokenizer_path: Optional[str] = None,
 ):
