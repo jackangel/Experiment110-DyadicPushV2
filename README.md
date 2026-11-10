@@ -91,14 +91,43 @@ Training directly on 4 million tokens in a single batch is impractical on consum
 
 ```
 dyadic_pushv2/
-├── model.py         # Complete DyadicShelfLM, DyadicShelfAttention, SwiGLU & RMSNorm
-├── tokenizer.py     # Subword BPE tokenizer with automatic ByteLevel decoding
-├── train.py         # 8K training pipeline with chunked cross-entropy, AMP & cosine LR
-├── predict.py       # Interactive text generation and CLI prediction tool
-├── test_suite.py    # 4-stage empirical verification test suite (Invariants, VRAM, NIAH, Coherence)
-├── input.txt        # Training corpus (ready to train out-of-the-box)
-├── requirements.txt # Dependencies
-└── README.md        # Method explanation and documentation
+├── model.py           # Complete DyadicShelfLM, DyadicShelfAttention, SwiGLU & RMSNorm
+├── tokenizer.py       # Subword BPE tokenizer with automatic ByteLevel decoding
+├── dataset_mixer.py   # Multi-dataset Parquet streaming, lookahead buffer & ledger
+├── train.py           # 8K training pipeline (single text or multi-dataset Parquet streaming)
+├── predict.py         # Interactive text generation and CLI prediction tool
+├── test_suite.py      # 4-stage empirical verification test suite (Invariants, VRAM, NIAH, Coherence)
+├── test_parquet.py    # Automated test suite for Parquet streaming, mixing & resumption
+├── input.txt          # Training corpus (ready to train out-of-the-box)
+├── requirements.txt   # Dependencies (torch, numpy, tokenizers, pyarrow)
+└── README.md          # Method explanation and documentation
+```
+
+---
+
+## 🚀 Training
+
+### 1. Mixed Multi-Dataset Parquet Streaming
+Stream large Parquet corpora without loading entire datasets into RAM:
+```bash
+python train.py \
+  --datasets wiki="D:\Data\Wikipedia":2.0 code="D:\Data\Code":1.0 \
+  --text_column "wiki=text,code=content" \
+  --mix_temperature 1.0 \
+  --grad_accum 4 \
+  --gsci \
+  --seq_len 4096 \
+  --batch_size 2 \
+  --max_steps 50000 \
+  --save_interval 5000
+```
+- **Temperature-adjusted mixing**: $p_i \propto w_i^{1/T}$.
+- **Automatic resumption**: Tracks completed files via checkpoint and `completed_files.json` ledger.
+- **Micro-batch gradient accumulation**: Multiplies effective batch size with optional Gradient Sign Chaos Injection (`--gsci`).
+
+### 2. Legacy Single Text File Training
+```bash
+python train.py --data input.txt --seq_len 4096 --batch_size 2 --max_steps 3000
 ```
 
 ---

@@ -32,8 +32,15 @@ class CharTokenizer:
     def vocab_size(self) -> int:
         return len(self.chars)
 
+    @property
+    def eot_token(self) -> int:
+        return self.stoi.get("\n", 0)
+
     def encode(self, text: str) -> List[int]:
         return [self.stoi[ch] for ch in text if ch in self.stoi]
+
+    def encode_ordinary(self, text: str) -> List[int]:
+        return self.encode(text)
 
     def decode(self, tokens: List[int]) -> str:
         return "".join([self.itos.get(idx, "") for idx in tokens])
@@ -102,7 +109,19 @@ class BPETokenizerWrapper:
     def vocab_size(self) -> int:
         return self.tokenizer.get_vocab_size()
 
+    @property
+    def eot_token(self) -> int:
+        if hasattr(self, "tokenizer"):
+            for sym in ["</s>", "<|endoftext|>", "<eos>", "<pad>"]:
+                tid = self.tokenizer.token_to_id(sym)
+                if tid is not None:
+                    return tid
+        return 0
+
     def encode(self, text: str) -> List[int]:
+        return self.tokenizer.encode(text).ids
+
+    def encode_ordinary(self, text: str) -> List[int]:
         return self.tokenizer.encode(text).ids
 
     def decode(self, tokens: List[int]) -> str:
@@ -144,16 +163,23 @@ class BPETokenizerWrapper:
 
 
 def load_or_create_tokenizer(
-    data_path: str,
+    data_path: Optional[str] = "input.txt",
     tokenizer_type: str = "auto",
     vocab_size: int = 8192,
     save_dir: str = "checkpoints",
+    tokenizer_path: Optional[str] = None,
 ):
     """
     Automatically selects, trains, or loads a tokenizer.
     If 'auto', uses BPE if 'tokenizers' is available, else falls back to CharTokenizer.
     """
     os.makedirs(save_dir, exist_ok=True)
+    if tokenizer_path and os.path.exists(tokenizer_path):
+        try:
+            return BPETokenizerWrapper.from_file(tokenizer_path)
+        except Exception as e:
+            print(f"[!] Failed to load tokenizer from '{tokenizer_path}': {e}")
+
     bpe_save_path = os.path.join(save_dir, "tokenizer.json")
 
     if os.path.exists(bpe_save_path):
@@ -170,17 +196,24 @@ def load_or_create_tokenizer(
         has_tokenizers = False
 
     if (tokenizer_type == "bpe" or tokenizer_type == "auto") and has_tokenizers:
-        print(f"[*] Training fast BPE tokenizer (vocab_size={vocab_size}) on {data_path}...")
-        tok = BPETokenizerWrapper.train_from_file(
-            data_path, vocab_size=vocab_size, save_path=bpe_save_path
-        )
-        print(f"[*] BPE tokenizer trained successfully. Vocabulary size: {tok.vocab_size}")
-        return tok
+        if data_path and os.path.exists(data_path):
+            print(f"[*] Training fast BPE tokenizer (vocab_size={vocab_size}) on {data_path}...")
+            tok = BPETokenizerWrapper.train_from_file(
+                data_path, vocab_size=vocab_size, save_path=bpe_save_path
+            )
+            print(f"[*] BPE tokenizer trained successfully. Vocabulary size: {tok.vocab_size}")
+            return tok
 
     # Fallback to CharTokenizer
-    print(f"[*] Building zero-dependency character-level tokenizer from {data_path}...")
-    with open(data_path, "r", encoding="utf-8", errors="ignore") as f:
-        text = f.read()
-    tok = CharTokenizer.train_from_text(text)
-    print(f"[*] Character tokenizer built. Unique characters / vocab size: {tok.vocab_size}")
-    return tok
+    if data_path and os.path.exists(data_path):
+        print(f"[*] Building zero-dependency character-level tokenizer from {data_path}...")
+        with open(data_path, "r", encoding="utf-8", errors="ignore") as f:
+            text = f.read()
+        tok = CharTokenizer.train_from_text(text)
+        print(f"[*] Character tokenizer built. Unique characters / vocab size: {tok.vocab_size}")
+        return tok
+
+    raise RuntimeError(
+        f"Cannot find or create a tokenizer. Checked: '{bpe_save_path}', '{data_path}'. "
+        "Please provide a valid --tokenizer_path or --data text file."
+    )
